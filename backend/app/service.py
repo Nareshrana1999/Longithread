@@ -15,7 +15,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .clinical.pipeline import run_pipeline
-from .models import ClinicalObservation, FollowUpTask, Patient, SourceDocument
+from .consent import (ConsentNotOnFile, RECORD_PROCESSING, UnknownPurpose,
+                      VALID_PURPOSES)
+from .models import (ClinicalObservation, ConsentRecord, FollowUpTask, Patient,
+                     SourceDocument)
 from .rules.engine import PROTOCOLS, evaluate
 from .security import TenantContext, log_action, scoped
 
@@ -122,6 +125,62 @@ def generate_tasks(session: Session, ctx: TenantContext, patient_id: uuid.UUID,
 
 def list_patients(session: Session, ctx: TenantContext) -> list[Patient]:
     return list(session.scalars(scoped(session, Patient, ctx)))
+
+
+def get_patient(session: Session, ctx: TenantContext, patient_id: uuid.UUID) -> Patient | None:
+    return session.scalars(scoped(session, Patient, ctx).where(Patient.id == patient_id)).first()
+
+
+# ---------------- consent / lawful basis ----------------
+
+def has_active_consent(session: Session, ctx: TenantContext, patient_id: uuid.UUID,
+                       purpose: str = RECORD_PROCESSING) -> bool:
+    """Active iff the latest consent row for (tenant, patient, purpose) is granted."""
+    rows = session.scalars(
+        scoped(session, ConsentRecord, ctx).where(
+            ConsentRecord.patient_id == patient_id,
+            ConsentRecord.purpose == purpose,
+        ).order_by(ConsentRecord.recorded_at.desc(), ConsentRecord.id.desc())
+    ).all()
+    return bool(rows) and rows[0].granted
+
+
+def _write_consent(session: Session, ctx: TenantContext, patient_id: uuid.UUID,
+                   purpose: str, basis: str, granted: bool) -> ConsentRecord:
+    if purpose not in VALID_PURPOSES:
+        raise UnknownPurpose(purpose)
+    record = ConsentRecord(
+        tenant_id=ctx.tenant_id, patient_id=patient_id, purpose=purpose,
+        basis=basis, granted=granted, recorded_by=ctx.actor_id,
+        # Full resolution so grant->revoke ordering is unambiguous.
+        recorded_at=datetime.now(timezone.utc).replace(tzinfo=None),
+    )
+    session.add(record)
+    session.flush()
+    log_action(session, ctx, "consent.granted" if granted else "consent.revoked",
+               "consent_record", record.id, {"purpose": purpose, "basis": basis})
+    return record
+
+
+def grant_consent(session: Session, ctx: TenantContext, patient_id: uuid.UUID, *,
+                  purpose: str = RECORD_PROCESSING, basis: str = "explicit_consent") -> ConsentRecord:
+    if get_patient(session, ctx, patient_id) is None:
+        raise PermissionError("patient not found in this tenant")
+    return _write_consent(session, ctx, patient_id, purpose, basis, True)
+
+
+def revoke_consent(session: Session, ctx: TenantContext, patient_id: uuid.UUID, *,
+                   purpose: str = RECORD_PROCESSING) -> ConsentRecord:
+    if get_patient(session, ctx, patient_id) is None:
+        raise PermissionError("patient not found in this tenant")
+    return _write_consent(session, ctx, patient_id, purpose, "revoked_by_patient", False)
+
+
+def require_active_consent(session: Session, ctx: TenantContext, patient_id: uuid.UUID,
+                           purpose: str = RECORD_PROCESSING) -> None:
+    """Gate an operation on an active lawful basis; raises if absent/revoked."""
+    if not has_active_consent(session, ctx, patient_id, purpose):
+        raise ConsentNotOnFile(patient_id)
 
 
 def cohort_records(session: Session, ctx: TenantContext) -> list[dict]:

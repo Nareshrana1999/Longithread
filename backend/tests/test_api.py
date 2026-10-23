@@ -4,10 +4,15 @@ from datetime import datetime
 from tests.conftest import _headers
 
 
-def _create_patient(client, tid):
+def _create_patient(client, tid, *, consent=True):
     r = client.post("/patients", json={"condition": "diabetes"}, headers=_headers(tid))
     assert r.status_code == 201
-    return r.json()["id"]
+    pid = r.json()["id"]
+    if consent:
+        c = client.post(f"/patients/{pid}/consent", json={"purpose": "record_processing"},
+                        headers=_headers(tid))
+        assert c.status_code == 201
+    return pid
 
 
 def test_health(client):

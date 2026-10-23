@@ -19,16 +19,22 @@ or changing treatment.**
    distinguish **RECORD_MISSING** from "never performed". Protocols: `diabetes_v1`,
    `hypertension_v1`, `hypertension_v2`, `ckd_v1`, `chronic_combined_v1`.
 6. **Safety** — prompt-injection text is quarantined and never becomes a fact.
-7. **Isolation & audit** — every query is tenant-scoped; state changes are logged
-   to an append-only audit trail.
-8. **AI decision support** — a transparent logistic-regression model turns validated
-   signals into a deterioration-risk score with per-factor attribution, provenance
-   back to the source document, and **abstention** when data is insufficient. Trained
-   and reported on a deterministic **synthetic** cohort; the raw weights and holdout
-   metrics are exposed at `/ml/model`, not hidden.
-9. **Cohort analytics** — team-level follow-up completion, overdue load, review rate,
-   monitoring-gap rate, and HbA1c trend aggregates, derived only from validated data.
-10. **Async jobs** — document imports run on a lightweight in-process queue
+7. **Consent / lawful basis** — an individual patient's clinical data cannot be
+   imported or read unless an active consent record is on file (`POST
+   /patients/{id}/consent`, revocable). Enforced at the API boundary; still needs
+   DB-level enforcement before a pilot.
+8. **Tamper-evident audit** — every state change is appended to a per-tenant
+   **hash chain** (`content_hash` commits to the event + the previous event's hash),
+   so edits, deletions, or reordering are detectable via `GET /audit/verify`.
+9. **Isolation** — every query is tenant-scoped at the data-access layer.
+10. **AI decision support** — a transparent logistic-regression model turns validated
+    signals into a deterioration-risk score with per-factor attribution, provenance
+    back to the source document, and **abstention** when data is insufficient. Trained
+    and reported on a deterministic **synthetic** cohort; the raw weights and holdout
+    metrics are exposed at `/ml/model`, not hidden.
+11. **Cohort analytics** — team-level follow-up completion, overdue load, review rate,
+    monitoring-gap rate, and HbA1c trend aggregates, derived only from validated data.
+12. **Async jobs** — document imports run on a lightweight in-process queue
     (`POST /jobs/import` → `GET /jobs/{id}`), so large batches don't block the API.
 
 ## Layout
@@ -39,7 +45,8 @@ backend/
     main.py                  # FastAPI routes (tenant-scoped)
     service.py               # DB orchestration, dedup, task generation
     models.py / db.py / config.py / schemas.py
-    security.py / audit.py   # tenant context + append-only audit
+    security.py / audit.py   # tenant context + hash-chained, verifiable audit trail
+    consent.py               # lawful-basis records gating per-patient processing
     clinical/                # extractor, validation, conflicts, terminology, pipeline
     rules/engine.py          # versioned care protocols
     ingestion/               # PDF/text ingestion seam
@@ -67,6 +74,9 @@ frontend/
 | GET | `/ml/model` | transparent weights + synthetic holdout metrics |
 | GET | `/patients/{id}/risk` | decision-support risk + attribution |
 | GET | `/analytics/cohort` | team-level aggregates |
+| POST | `/patients/{id}/consent` · `/consent/revoke` · GET `/consent` | grant / revoke / status lawful basis |
+| GET | `/audit/verify` | integrity check of the tenant audit hash chain |
+| GET | `/audit/events` | list audit events (tenant-scoped) |
 | POST | `/jobs/import` · GET `/jobs/{id}` | async document import |
 
 ## Run
@@ -83,18 +93,21 @@ Open `http://127.0.0.1:8000/` for the dashboard. Postgres via Docker:
 ## Tests & acceptance gate
 ```bash
 pip install fastapi httpx sqlalchemy pydantic pydantic-settings pytest uvicorn
-python -m pytest                       # 39 tests
-python -m tests.eval_harness           # prints Phase A metrics vs thresholds
+python -m pytest                       # 52 tests
+python -m tests.eval_harness           # prints Phase A metrics vs thresholds (nonzero exit on a breach)
 ```
+GitHub Actions (`.github/workflows/ci.yml`) runs both on every push/PR to `main`.
 The eval gate (set **before** results, per the blueprint) requires, among others:
 source-attribution 100%, unsupported-claim rate ≤ 0.10, prompt-injection
 resistance 100%. All currently pass on the synthetic set.
 
 ## Deliberate limits (do before any pilot)
-Real authentication (not headers), database row-level security, consent/authorization
-records, OCR quality, terminology catalogs reviewed by a clinician, tamper-evident
-audit retention, real-data model training/validation, and a formal CDSCO/DPDP
-intended-use assessment. The ML risk score is a synthetic-baseline decision aid only —
-it does not diagnose, and its accuracy on real patients is unproven.
+Real authentication (not headers) and authorization/RBAC; move consent and audit
+enforcement **into the database** (row-level security, revoke-only append grants,
+retention policy) — today the consent gate and the tamper-evident chain live in the
+app/API layer. Also outstanding: OCR quality, clinician-reviewed terminology catalogs,
+real-data model training/validation, and a formal CDSCO/DPDP intended-use assessment.
+The ML risk score is a synthetic-baseline decision aid only — it does not diagnose,
+and its accuracy on real patients is unproven.
 
 See `../ROADMAP.md` for the future-ready build-out and business plan.

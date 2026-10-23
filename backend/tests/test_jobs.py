@@ -6,7 +6,9 @@ from tests.conftest import _headers
 
 
 def _patient(client, tid):
-    return client.post("/patients", json={"condition": "diabetes"}, headers=_headers(tid)).json()["id"]
+    pid = client.post("/patients", json={"condition": "diabetes"}, headers=_headers(tid)).json()["id"]
+    client.post(f"/patients/{pid}/consent", json={"purpose": "record_processing"}, headers=_headers(tid))
+    return pid
 
 
 def test_async_import_job_completes(client):

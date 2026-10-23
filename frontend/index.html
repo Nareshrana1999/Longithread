@@ -128,6 +128,8 @@ async function req(path, opts={}){ const r = await fetch($('#base').value+path, 
 
 async function createPatient(){
   const p = await req('/patients',{method:'POST',body:JSON.stringify({condition:$('#condition').value})});
+  // A record can only be processed with an active lawful basis on file.
+  await req('/patients/'+p.id+'/consent',{method:'POST',body:JSON.stringify({purpose:'record_processing',basis:'explicit_consent'})});
   await loadPatients(); $('#patientSel').value = p.id; await loadTimeline();
 }
 async function loadPatients(){

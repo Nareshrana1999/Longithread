@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, JSON, String, Text, Uuid, func
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, JSON, String, Text, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
@@ -90,14 +90,43 @@ class FollowUpTask(Base):
 
 
 class AuditEvent(Base):
-    """Append-only. Never update or delete rows."""
+    """Append-only, hash-chained per tenant. Never update or delete rows.
+
+    ``content_hash`` commits to every field of this event plus ``prev_hash`` (the
+    ``content_hash`` of the previous event in the same tenant chain). Editing,
+    deleting, or reordering any earlier event therefore breaks the chain at that
+    point, so ``verify_audit_chain`` can detect tampering rather than merely
+    recording history.
+    """
 
     __tablename__ = "audit_events"
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     tenant_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
+    seq: Mapped[int] = mapped_column(Integer, nullable=False)
     actor_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
     action: Mapped[str] = mapped_column(Text, nullable=False)
     entity_type: Mapped[str] = mapped_column(Text, nullable=False)
     entity_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
     detail: Mapped[dict | None] = mapped_column(JSON)
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    content_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    prev_hash: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class ConsentRecord(Base):
+    """A patient's lawful basis for processing, per purpose. Append-only history.
+
+    The latest row for a (tenant, patient, purpose) sets the state: granted=True
+    is active, granted=False is revoked. Importing or reading an individual
+    patient's clinical data requires active consent for the relevant purpose.
+    """
+
+    __tablename__ = "consent_records"
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
+    patient_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("patients.id"), nullable=False, index=True)
+    purpose: Mapped[str] = mapped_column(String, nullable=False)
+    basis: Mapped[str] = mapped_column(String, nullable=False)
+    granted: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    recorded_by: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)

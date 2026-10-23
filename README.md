@@ -20,7 +20,7 @@ data — **clinical decision support, not a medical device, and not for patient 
 | Follow-up rules | Versioned, clinician-approved protocols create tasks; distinguishes `RECORD_MISSING` from "never performed" |
 | AI decision support | Transparent logistic-regression deterioration risk with factor attribution, provenance, and **abstention** when data is thin |
 | Cohort analytics | Follow-up completion, overdue load, monitoring-gap rate, HbA1c trends — from validated data only |
-| Safety & governance | Prompt-injection quarantine, tenant isolation, append-only audit trail |
+| Governance | Consent (lawful basis) gates per-patient import/read; tamper-evident hash-chained audit trail with `GET /audit/verify`; tenant isolation |
 
 ## What it does *not* do (and won't claim)
 
@@ -41,18 +41,26 @@ uvicorn app.main:app --reload            # dashboard at http://127.0.0.1:8000/
 ```
 
 ```bash
-python -m pytest                         # 39 tests
-python -m tests.eval_harness             # Phase-A acceptance gate vs thresholds
+python -m pytest                         # 52 tests
+python -m tests.eval_harness             # Phase-A acceptance gate (nonzero exit on a breach)
 ```
 
 The eval gate requires, among others: source attribution 100%, prompt-injection
 resistance 100%, unsupported-claim rate ≤ 0.10. All currently pass on the synthetic set.
+GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs the suite
+and the acceptance gate on every push and pull request to `main`.
+
+Note: importing or reading an individual patient's data now requires an active consent
+record (`POST /patients/{id}/consent`); the dashboard grants it automatically on create.
 
 ## Repository layout
 
 ```
 .
+├── README.md             # this file
+├── LICENSE               # proprietary — all rights reserved
 ├── ROADMAP.md            # phased product, technology & business plan (read this)
+├── .github/workflows/ci.yml   # CI: pytest + acceptance gate on push/PR
 ├── backend/              # FastAPI + SQLAlchemy service, clinical pipeline, ML, tests
 │   └── README.md         # detailed backend docs & API surface
 ├── frontend/
@@ -63,9 +71,11 @@ resistance 100%, unsupported-claim rate ≤ 0.10. All currently pass on the synt
 
 ## Before any pilot
 
-Real authentication (not headers), database row-level security, consent/authorization
-records, OCR of real records, clinician-reviewed terminology, tamper-evident audit
-retention, real-data model validation, and a formal CDSCO/DPDP intended-use assessment.
+Real authentication (not headers) and RBAC, and moving consent + audit enforcement
+**into the database** (row-level security, revoke-only append grants, retention).
+Today consent gating and the tamper-evident chain run in the app/API layer. Also
+outstanding: OCR of real records, clinician-reviewed terminology, real-data model
+validation, and a formal CDSCO/DPDP intended-use assessment.
 See [ROADMAP.md](ROADMAP.md) for the full sequencing.
 
 ## License

@@ -21,16 +21,34 @@ from sqlalchemy.orm import Session
 
 from . import service
 from .analytics.cohort import summarize_cohort
+from .audit import list_events, verify_audit_chain
+from .consent import (RECORD_PROCESSING, ConsentNotOnFile, UnknownPurpose,
+                      VALID_PURPOSES)
 from .db import SessionLocal, get_session, init_db
 from .jobs.queue import default_runner
 from .ml.risk import default_model
 from .models import FollowUpTask, Patient
 from .rules.engine import PROTOCOLS
-from .schemas import (DocumentIn, ImportResult, ObservationOut, PatientCreate,
+from .schemas import (AuditEventOut, ConsentIn, ConsentOut, ConsentStatus,
+                      DocumentIn, ImportResult, ObservationOut, PatientCreate,
                       PatientOut, TaskOut, TimelineEntry)
 from .security import TenantContext, get_current_context, log_action, scoped
 
 DASHBOARD = Path(__file__).resolve().parents[2] / "frontend" / "index.html"
+
+
+def _guard_patient(session: Session, ctx: TenantContext, patient_id: uuid.UUID) -> None:
+    """404 if the patient is not in this tenant; 403 if no lawful basis to process.
+
+    Order matters: a cross-tenant probe returns 404 (we never confirm existence),
+    and only an in-tenant patient without active consent returns 403.
+    """
+    if service.get_patient(session, ctx, patient_id) is None:
+        raise HTTPException(404, "patient not found in this tenant")
+    try:
+        service.require_active_consent(session, ctx, patient_id, RECORD_PROCESSING)
+    except ConsentNotOnFile as exc:
+        raise HTTPException(403, "no active consent on file to process this patient") from exc
 
 
 @asynccontextmanager
@@ -77,6 +95,7 @@ def list_patients(session: Session = Depends(get_session),
 @app.post("/documents", response_model=ImportResult, status_code=201)
 def import_document(payload: DocumentIn, session: Session = Depends(get_session),
                     ctx: TenantContext = Depends(get_current_context)) -> ImportResult:
+    _guard_patient(session, ctx, payload.patient_id)
     try:
         out = service.import_document(
             session, ctx, patient_id=payload.patient_id, document_type=payload.document_type,
@@ -93,12 +112,14 @@ def import_document(payload: DocumentIn, session: Session = Depends(get_session)
 @app.get("/patients/{patient_id}/observations", response_model=list[ObservationOut])
 def list_observations(patient_id: uuid.UUID, session: Session = Depends(get_session),
                       ctx: TenantContext = Depends(get_current_context)):
+    _guard_patient(session, ctx, patient_id)
     return service.patient_observations(session, ctx, patient_id)
 
 
 @app.get("/patients/{patient_id}/timeline", response_model=list[TimelineEntry])
 def timeline(patient_id: uuid.UUID, session: Session = Depends(get_session),
              ctx: TenantContext = Depends(get_current_context)):
+    _guard_patient(session, ctx, patient_id)
     obs = service.patient_observations(session, ctx, patient_id)
     entries = [
         TimelineEntry(observed_at=o.observed_at, code=o.code, value_numeric=o.value_numeric,
@@ -116,6 +137,7 @@ def generate_tasks(patient_id: uuid.UUID, protocol: str = "diabetes_v1",
                    ctx: TenantContext = Depends(get_current_context)):
     if protocol not in PROTOCOLS:
         raise HTTPException(400, f"unknown protocol; one of {sorted(PROTOCOLS)}")
+    _guard_patient(session, ctx, patient_id)
     tasks = service.generate_tasks(session, ctx, patient_id, protocol=protocol)
     session.commit()
     return tasks
@@ -164,10 +186,8 @@ def ml_model(ctx: TenantContext = Depends(get_current_context)):
 def patient_risk(patient_id: uuid.UUID, as_of: datetime | None = None,
                  session: Session = Depends(get_session),
                  ctx: TenantContext = Depends(get_current_context)):
-    try:
-        assessment = service.risk_for_patient(session, ctx, patient_id, as_of=as_of)
-    except PermissionError:
-        raise HTTPException(404, "patient not found in this tenant")
+    _guard_patient(session, ctx, patient_id)
+    assessment = service.risk_for_patient(session, ctx, patient_id, as_of=as_of)
     return asdict(assessment)
 
 
@@ -178,10 +198,73 @@ def cohort_analytics(as_of: datetime | None = None, session: Session = Depends(g
     return summarize_cohort(records, as_of=as_of).to_dict()
 
 
+# ---------------- consent / lawful basis ----------------
+
+@app.post("/patients/{patient_id}/consent", response_model=ConsentOut, status_code=201)
+def grant_consent(patient_id: uuid.UUID, payload: ConsentIn,
+                  session: Session = Depends(get_session),
+                  ctx: TenantContext = Depends(get_current_context)):
+    if payload.purpose not in VALID_PURPOSES:
+        raise HTTPException(400, f"unknown purpose; one of {sorted(VALID_PURPOSES)}")
+    try:
+        record = service.grant_consent(session, ctx, patient_id,
+                                       purpose=payload.purpose, basis=payload.basis)
+    except PermissionError:
+        raise HTTPException(404, "patient not found in this tenant")
+    except UnknownPurpose as exc:
+        raise HTTPException(400, f"unknown purpose: {exc}") from exc
+    session.commit()
+    return record
+
+
+@app.post("/patients/{patient_id}/consent/revoke", response_model=ConsentOut, status_code=201)
+def revoke_consent(patient_id: uuid.UUID, payload: ConsentIn,
+                   session: Session = Depends(get_session),
+                   ctx: TenantContext = Depends(get_current_context)):
+    if payload.purpose not in VALID_PURPOSES:
+        raise HTTPException(400, f"unknown purpose; one of {sorted(VALID_PURPOSES)}")
+    try:
+        record = service.revoke_consent(session, ctx, patient_id, purpose=payload.purpose)
+    except PermissionError:
+        raise HTTPException(404, "patient not found in this tenant")
+    session.commit()
+    return record
+
+
+@app.get("/patients/{patient_id}/consent", response_model=list[ConsentStatus])
+def consent_status(patient_id: uuid.UUID, session: Session = Depends(get_session),
+                   ctx: TenantContext = Depends(get_current_context)):
+    if service.get_patient(session, ctx, patient_id) is None:
+        raise HTTPException(404, "patient not found in this tenant")
+    return [ConsentStatus(purpose=p, active=service.has_active_consent(session, ctx, patient_id, p))
+            for p in sorted(VALID_PURPOSES)]
+
+
+# ---------------- tamper-evident audit ----------------
+
+@app.get("/audit/verify")
+def audit_verify(session: Session = Depends(get_session),
+                 ctx: TenantContext = Depends(get_current_context)):
+    """Integrity check of the caller's tenant audit chain. `valid: false` means the
+    append-only history was edited, deleted, or reordered somewhere."""
+    return verify_audit_chain(session, ctx.tenant_id)
+
+
+@app.get("/audit/events", response_model=list[AuditEventOut])
+def audit_events(entity_type: str | None = None, entity_id: uuid.UUID | None = None,
+                 session: Session = Depends(get_session),
+                 ctx: TenantContext = Depends(get_current_context)):
+    return list_events(session, ctx.tenant_id, entity_type=entity_type, entity_id=entity_id)
+
+
 # ---------------- async import jobs ----------------
 
 @app.post("/jobs/import", status_code=202)
-def enqueue_import(payload: DocumentIn, ctx: TenantContext = Depends(get_current_context)):
+def enqueue_import(payload: DocumentIn, session: Session = Depends(get_session),
+                   ctx: TenantContext = Depends(get_current_context)):
+    # Check existence + lawful basis synchronously before accepting the job.
+    _guard_patient(session, ctx, payload.patient_id)
+
     def _work():
         db = SessionLocal()
         try:

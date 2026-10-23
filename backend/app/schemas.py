@@ -74,3 +74,35 @@ class ImportResult(BaseModel):
     observations_created: int
     flagged: int
     conflicts: int
+
+
+class ConsentIn(BaseModel):
+    purpose: str = "record_processing"
+    basis: str = "explicit_consent"
+
+
+class ConsentOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    patient_id: uuid.UUID
+    purpose: str
+    basis: str
+    granted: bool
+    recorded_at: datetime
+
+
+class ConsentStatus(BaseModel):
+    purpose: str
+    active: bool
+
+
+class AuditEventOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    seq: int
+    action: str
+    entity_type: str
+    entity_id: uuid.UUID
+    actor_id: uuid.UUID | None
+    created_at: datetime
+    content_hash: str
+    prev_hash: str

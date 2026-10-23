@@ -185,6 +185,8 @@ def check_thresholds(metrics: Metrics) -> list[str]:
 
 
 if __name__ == "__main__":
+    import sys
+
     m = run()
     print("Eval metrics:")
     for k, v in m.values.items():
@@ -195,3 +197,4 @@ if __name__ == "__main__":
         print("\nDetails:")
         for d in m.details:
             print("  ", d)
+    sys.exit(1 if viol else 0)

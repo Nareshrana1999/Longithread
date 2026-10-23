@@ -81,10 +81,13 @@ Goal: a pilot-ready, secure, multi-tenant SaaS. **No new clinical claims.**
       admin), session audit. Retire header-based identity.
 - [ ] **Row-level security** in Postgres (`tenant_id` enforced by policy, not app code);
       move SQLite → Postgres everywhere.
-- [ ] **Consent & authorization records** as first-class tables; every read of a
-      patient's data checks a lawful basis. Wire into DPDP obligations.
-- [ ] **Tamper-evident audit**: hash-chained, append-only, exportable audit log with
-      retention policy.
+- [x] **Consent & authorization records** as first-class tables; every read of a
+      patient's data checks a lawful basis. **Done at the app/API layer** (grant/revoke,
+      per-purpose, enforced before import and per-patient reads); wire into DPDP
+      obligations and move enforcement **into the database** (RLS) as the next step.
+- [x] **Tamper-evident audit**: hash-chained, append-only, verifiable chain
+      (`GET /audit/verify`). **Done** — editing/deleting/reordering is now detectable;
+      still needs DB-level revoke-only append grants + an exportable retention policy.
 - [ ] **Real ingestion**: PDF text + OCR seam wired to a vetted OCR engine; multilingual
       (English + Hindi/regional) lab reports; page/section-level provenance.
 - [ ] **Terminology mapping**: LOINC/SNOMED subsets + a clinician-owned alias catalog;
