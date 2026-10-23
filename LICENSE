@@ -1,0 +1,19 @@
+Copyright (c) 2026 Naresh Rana. All rights reserved.
+
+This repository and its source code, including the Longithread backend, frontend,
+documentation, and associated materials, are the proprietary work of the copyright
+holder named above. No license is granted to use, copy, modify, merge, publish,
+distribute, sublicense, or sell any part of this software, in source or compiled
+form, except under a separate written agreement signed by the copyright holder.
+
+Requests regarding licensing or commercial use should be directed to the repository
+owner.
+
+DISCLAIMER: This software is a developer prototype provided for evaluation only. It
+is clinical decision-support software, NOT a medical device, and is NOT intended for
+diagnosis, treatment, or patient care. It runs on synthetic data and has not been
+validated for real-world clinical use. It is provided "as is", without warranty of
+any kind, express or implied, including but not limited to the warranties of
+merchantability, fitness for a particular purpose and noninfringement. In no event
+shall the copyright holder be liable for any claim, damages or other liability
+arising from, out of, or in connection with the software or the use of the software.
