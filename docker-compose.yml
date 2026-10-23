@@ -1,0 +1,19 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: longithread
+      POSTGRES_PASSWORD: longithread
+      POSTGRES_DB: longithread
+    ports: ["5432:5432"]
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+
+  api:
+    build: ./backend
+    environment:
+      DATABASE_URL: postgresql+psycopg://longithread:longithread@db:5432/longithread
+    ports: ["8000:8000"]
+    depends_on: [db]
+
+volumes:
+  pgdata:

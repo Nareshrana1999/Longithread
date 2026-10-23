@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Longithread — Longitudinal Care Intelligence</title>
+<style>
+  :root{
+    --bg:#070b16; --panel:rgba(255,255,255,.04); --stroke:rgba(120,160,255,.18);
+    --txt:#e7ecff; --muted:#8ea0c8; --acc:#5ce1e6; --acc2:#8b7bff; --ok:#3ddc97; --warn:#ffb454; --bad:#ff5c7a;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font:15px/1.5 system-ui,Segoe UI,Inter,Roboto,sans-serif;color:var(--txt);
+    background:radial-gradient(1200px 600px at 80% -10%,rgba(92,225,230,.14),transparent),
+               radial-gradient(1000px 700px at -10% 10%,rgba(139,123,255,.16),transparent),var(--bg);min-height:100vh}
+  header{padding:22px 28px;display:flex;align-items:center;gap:14px;border-bottom:1px solid var(--stroke)}
+  .logo{width:34px;height:34px;border-radius:9px;background:linear-gradient(135deg,var(--acc),var(--acc2));
+    box-shadow:0 0 24px rgba(139,123,255,.6)}
+  h1{font-size:18px;margin:0;font-weight:650;letter-spacing:.3px}
+  .tag{font-size:11px;color:var(--muted)}
+  .wrap{display:grid;grid-template-columns:360px 1fr;gap:20px;padding:22px 28px;align-items:start}
+  @media(max-width:900px){.wrap{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--stroke);border-radius:16px;padding:16px;
+    backdrop-filter:blur(10px);box-shadow:0 8px 30px rgba(0,0,0,.35);margin-bottom:16px}
+  .card h2{font-size:13px;margin:0 0 10px;color:var(--acc);text-transform:uppercase;letter-spacing:1px}
+  label{display:block;font-size:12px;color:var(--muted);margin:8px 0 3px}
+  input,textarea,select{width:100%;background:rgba(0,0,0,.35);border:1px solid var(--stroke);color:var(--txt);
+    border-radius:9px;padding:9px;font:inherit}
+  textarea{min-height:74px;resize:vertical}
+  button{cursor:pointer;border:0;border-radius:10px;padding:10px 14px;font-weight:600;color:#04101a;
+    background:linear-gradient(135deg,var(--acc),var(--acc2));margin-top:10px;width:100%}
+  button.ghost{background:transparent;color:var(--acc);border:1px solid var(--stroke)}
+  .row{display:flex;gap:10px}.row>*{flex:1}
+  .kv{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px dashed var(--stroke);font-size:13px}
+  .kv b{color:var(--txt)}
+  .chip{display:inline-block;font-size:11px;padding:2px 8px;border-radius:999px;border:1px solid var(--stroke)}
+  .band-high{color:var(--bad)} .band-moderate{color:var(--warn)} .band-low{color:var(--ok)}
+  table{width:100%;border-collapse:collapse;font-size:12px}
+  th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--stroke)}
+  .muted{color:var(--muted)} .small{font-size:11px}
+  .foot{padding:14px 28px;color:var(--muted);font-size:12px;border-top:1px solid var(--stroke)}
+  .stat{font-size:22px;font-weight:700} .stat-l{font-size:11px;color:var(--muted)}
+  .grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+  .src{color:var(--acc2)}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo"></div>
+  <div><h1>Longithread</h1><div class="tag">Longitudinal care intelligence · decision support only</div></div>
+</header>
+
+<div class="wrap">
+  <!-- LEFT: controls -->
+  <div>
+    <div class="card">
+      <h2>Connection</h2>
+      <label>API base URL</label><input id="base" value="">
+      <label>Tenant ID (UUID)</label><input id="tenant">
+      <label>User role</label>
+      <select id="role"><option>clinician</option><option>coordinator</option><option>admin</option></select>
+      <button class="ghost" onclick="loadPatients()">Refresh patients</button>
+    </div>
+
+    <div class="card">
+      <h2>Patient</h2>
+      <label>Condition</label>
+      <select id="condition"><option>diabetes</option><option>hypertension</option><option>ckd</option></select>
+      <button onclick="createPatient()">Create patient</button>
+      <label>Active patient</label><select id="patientSel"></select>
+    </div>
+
+    <div class="card">
+      <h2>Import record</h2>
+      <label>Document type</label>
+      <select id="doctype"><option>lab_report</option><option>discharge_summary</option><option>prescription</option><option>scanned_lab</option></select>
+      <label>Text (authorized / synthetic)</label>
+      <textarea id="docText">HbA1c 58 mmol/mol 2024-01-10
+LDL cholesterol 150 mg/dL 2024-01-10
+BP 150/95 mmHg 2024-01-10</textarea>
+      <label>Reference date</label><input id="refdate" type="date" value="2024-06-01">
+      <div class="row">
+        <button onclick="importDoc(false)">Import (sync)</button>
+        <button class="ghost" onclick="importDoc(true)">Import (async)</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Run analysis</h2>
+      <label>Care protocol</label>
+      <select id="protocol">
+        <option value="diabetes_v1">Diabetes v1</option>
+        <option value="hypertension_v2">Hypertension v2</option>
+        <option value="ckd_v1">CKD v1</option>
+        <option value="chronic_combined_v1">Chronic combined v1</option>
+      </select>
+      <button onclick="genTasks()">Generate follow-ups</button>
+      <button class="ghost" onclick="scoreRisk()">Assess deterioration risk</button>
+      <button class="ghost" onclick="cohort()">Cohort analytics</button>
+    </div>
+  </div>
+
+  <!-- RIGHT: results -->
+  <div>
+    <div class="card"><h2>Patient timeline (with provenance)</h2>
+      <table id="timeline"><thead><tr><th>Date</th><th>Code</th><th>Value</th><th>Unit</th><th>Status</th><th>Source</th></tr></thead><tbody></tbody></table>
+      <div class="muted small" id="tlNote">No patient selected.</div>
+    </div>
+
+    <div class="card"><h2>AI decision support · risk</h2><div id="risk">Run an assessment to see a transparent, clinician-facing risk breakdown. It never diagnoses or changes treatment.</div></div>
+    <div class="card"><h2>Follow-up tasks</h2><div id="tasks">Generate follow-ups to see clinician-approved protocol tasks.</div></div>
+    <div class="card"><h2>Cohort analytics</h2><div id="analytics">Select cohort analytics to aggregate completion rates, overdue load, monitoring gaps, and trends.</div></div>
+  </div>
+</div>
+
+<div class="foot">Longithread MVP · synthetic developer data · CDSCO/DPPDO-ready governance pending formal regulatory assessment · not a medical device.</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const uid = () => (crypto.randomUUID ? crypto.randomUUID() : 't'+Date.now());
+$('#tenant').value = localStorage.getItem('lt_tenant') || uid();
+localStorage.setItem('lt_tenant', $('#tenant').value);
+$('#base').value = localStorage.getItem('lt_base') || location.origin.replace(/\/$/,'');
+const H = () => ({'content-type':'application/json','x-tenant-id':$('#tenant').value,'x-user-role':$('#role').value});
+const pid = () => $('#patientSel').value;
+async function req(path, opts={}){ const r = await fetch($('#base').value+path, {...opts, headers:{...H(),...(opts.headers||{})}});
+  if(!r.ok){ alert('Error '+r.status+': '+(await r.text())); throw new Error(r.status);} return r.json(); }
+
+async function createPatient(){
+  const p = await req('/patients',{method:'POST',body:JSON.stringify({condition:$('#condition').value})});
+  await loadPatients(); $('#patientSel').value = p.id; await loadTimeline();
+}
+async function loadPatients(){
+  const ps = await req('/patients'); const sel=$('#patientSel'); sel.innerHTML='';
+  ps.forEach(p=>{const o=document.createElement('option');o.value=p.id;o.textContent=(p.condition||'pt')+' · '+p.id.slice(0,8);sel.appendChild(o);});
+  if(ps.length) loadTimeline();
+}
+async function loadTimeline(){
+  if(!pid()) return; const rows = await req('/patients/'+pid()+'/timeline');
+  const tb=$('#timeline tbody'); tb.innerHTML='';
+  rows.forEach(e=>{const tr=document.createElement('tr');
+    tr.innerHTML=`<td>${e.observed_at?e.observed_at.slice(0,10):'—'}</td><td>${e.code}</td>
+      <td>${e.value_numeric??e.value_text??''}</td><td>${e.unit||''}</td>
+      <td class="${e.status==='validated'?'band-low':'band-moderate'}">${e.status}</td>
+      <td class="src small">${(e.source_document_id||'').slice(0,8)}</td>`; tb.appendChild(tr);});
+  $('#tlNote').textContent = rows.length? `${rows.length} observation(s). Every fact cites a source document.` : 'No observations yet.';
+}
+async function importDoc(async_){
+  const body={patient_id:pid(),document_type:$('#doctype').value,text:$('#docText').value,reference_date:$('#refdate').value+'T00:00:00'};
+  if(!body.patient_id) return alert('Create/select a patient first');
+  if(!async_){ const out=await req('/documents',{method:'POST',body:JSON.stringify(body)});
+    await loadTimeline(); alert('Imported: '+JSON.stringify(out)); }
+  else { const j=await req('/jobs/import',{method:'POST',body:JSON.stringify(body)});
+    poll(j.job_id); }
+}
+async function poll(id){ const j=await req('/jobs/'+id);
+  if(j.status==='done'||j.status==='error'){ await loadTimeline(); $('#risk').innerHTML='<b>Async job</b>: '+JSON.stringify(j);}
+  else setTimeout(()=>poll(id),300); }
+async function genTasks(){ if(!pid()) return; const t=await req('/patients/'+pid()+'/tasks/generate?protocol='+$('#protocol').value,{method:'POST'});
+  $('#tasks').innerHTML='<table><thead><tr><th>Rule</th><th>Due</th><th>Status</th><th></th></tr></thead><tbody>'+
+   (t.map(x=>`<tr><td>${x.rule_id}</td><td>${(x.due_at||'').slice(0,10)}</td><td>${x.status}</td>
+     <td><button class="ghost" style="width:auto;padding:4px 8px" onclick="review('${x.id}','done')">mark done</button></td></tr>`).join('')||'<tr><td colspan=4 class=muted>None due.</td></tr>')+'</tbody></table>'; }
+async function review(id,dec){ await req('/tasks/'+id+'/review',{method:'POST',headers:{'X-Decision':dec}}); genTasks(); }
+async function scoreRisk(){ if(!pid()) return; const r=await req('/patients/'+pid()+'/risk');
+  if(!r.patient_scored){ $('#risk').innerHTML=`<span class="band-moderate">Abstained</span>: ${r.abstain_reason}. ${r.recommendation}`; return; }
+  $('#risk').innerHTML=`<div class="row"><div><div class="stat band-${r.band}">${(r.probability*100).toFixed(0)}%</div><div class="stat-l">risk · ${r.band} band</div></div>
+   <div style="flex:3"><div class="small muted">synthetic-model metrics:</div><span class="chip">AUC ${r.model_metrics.auc}</span> <span class="chip">precision ${r.model_metrics.precision}</span> <span class="chip">recall ${r.model_metrics.recall}</span></div></div>
+   <div class="muted small">${r.recommendation}</div>
+   <table><thead><tr><th>Factor</th><th>Value</th><th>Contribution</th><th>Source docs</th></tr></thead><tbody>
+   ${r.factors.map(f=>`<tr><td>${f.name}</td><td>${f.value}</td><td>${f.contribution}</td><td class="src small">${f.source_document_ids.join(', ')||'—'}</td></tr>`).join('')}</tbody></table>`; }
+async function cohort(){ const a=await req('/analytics/cohort');
+  $('#analytics').innerHTML=`<div class="grid4">
+   <div><div class="stat">${a.n_patients}</div><div class="stat-l">patients</div></div>
+   <div><div class="stat">${(a.completion_rate*100).toFixed(0)}%</div><div class="stat-l">follow-up completion</div></div>
+   <div><div class="stat band-${a.tasks_overdue?'high':'low'}">${a.tasks_overdue}</div><div class="stat-l">overdue tasks</div></div>
+   <div><div class="stat band-${a.monitoring_gap_rate>.3?'high':'low'}">${(a.monitoring_gap_rate*100).toFixed(0)}%</div><div class="stat-l">monitoring gaps</div></div></div>
+   <div class="muted small">mean HbA1c ${a.mean_latest_hba1c??'—'} · mean trend/mo ${a.mean_hba1c_slope_per_month??'—'}</div>
+   <table><thead><tr><th>Condition</th><th>Patients</th><th>Tasks</th><th>Overdue</th><th>Completion</th></tr></thead><tbody>
+   ${Object.entries(a.by_condition).map(([k,v])=>`<tr><td>${k}</td><td>${v.patients}</td><td>${v.tasks}</td><td>${v.overdue}</td><td>${(v.completion_rate*100).toFixed(0)}%</td></tr>`).join('')||'<tr><td colspan=5 class=muted>none</td></tr>'}</tbody></table>`; }
+loadPatients();
+</script>
+</body>
+</html>
